@@ -27,7 +27,7 @@ class _ReserveParkingScreenState extends State<ReserveParkingScreen> {
   }
 
   Future<void> fetchUserStatus() async {
-    final url = Uri.parse('http:/10.0.0.10:5000//users');
+    final url = Uri.parse('http://localhost:5000//users');
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
@@ -45,7 +45,7 @@ class _ReserveParkingScreenState extends State<ReserveParkingScreen> {
   }
 
   Future<void> fetchAvailableSpots() async {
-    final url = Uri.parse('http://10.0.0.10:5000/available_spots');
+    final url = Uri.parse('http://localhost:5000/available_spots');
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
@@ -135,7 +135,7 @@ class _ReserveParkingScreenState extends State<ReserveParkingScreen> {
       selectedEndTime!.minute,
     );
 
-    final url = Uri.parse('http://10.0.0.10:5000/add_reservation');
+    final url = Uri.parse('http://localhost:5000/add_reservation');
     final body = jsonEncode({
       "user_id": widget.userId,
       "spot_id": spotId,

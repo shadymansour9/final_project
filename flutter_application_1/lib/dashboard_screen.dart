@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -21,83 +22,83 @@ class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text("דשבורד"),
+        backgroundColor: Colors.teal,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'התנתקות',
+            onPressed: () {
+              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+            },
+          ),
+        ],
+      ),
       body: Stack(
         children: [
-          // ✅ רקע עם תמונה
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage("assets/images/cta-bg.jpg"),
-                fit: BoxFit.cover,
-              ),
-            ),
+          Positioned.fill(
+            child: Image.asset("assets/images/cta-bg.jpg", fit: BoxFit.cover),
           ),
-
-          // ✅ תוכן שקוף על הרקע
+          Container(color: Colors.black.withOpacity(0.4)),
           Center(
-            child: SingleChildScrollView(
-              child: Card(
-                color: Colors.white.withOpacity(0.88),
-                elevation: 10,
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  width: 420,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         'דשבורד - ${role.toUpperCase()}',
                         style: const TextStyle(
-                          fontSize: 22,
+                          fontSize: 24,
                           fontWeight: FontWeight.bold,
-                          color: Colors.teal,
+                          color: Colors.white,
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       Text(
                         'ברוך הבא, $name!',
-                        style: const TextStyle(fontSize: 18),
+                        style: const TextStyle(fontSize: 18, color: Colors.white70),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
 
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.history),
-                        label: const Text('ההזמנות שלי'),
+                      _buildButton(
+                        context,
+                        label: "ההזמנות שלי",
+                        icon: Icons.history,
+                        color: Colors.blue,
                         onPressed: () {
-                          Navigator.pushNamed(
-                            context,
-                            '/my_reservations',
-                            arguments: userId,
-                          );
+                          Navigator.pushNamed(context, '/my_reservations', arguments: userId);
                         },
-                        style: _buttonStyle(Colors.blue),
                       ),
-                      const SizedBox(height: 16),
-
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text('בצע הזמנה'),
+                      _buildButton(
+                        context,
+                        label: "בצע הזמנה",
+                        icon: Icons.add,
+                        color: Colors.green,
                         onPressed: status.toLowerCase() == 'blocked'
                             ? null
                             : () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/reserve_parking',
-                                  arguments: userId,
-                                );
+                                Navigator.pushNamed(context, '/reserve_parking', arguments: userId);
                               },
-                        style: _buttonStyle(Colors.green),
                       ),
-                      const SizedBox(height: 16),
-
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.edit),
-                        label: const Text('עריכת פרופיל'),
+                      _buildButton(
+                        context,
+                        label: "עריכת פרופיל",
+                        icon: Icons.edit,
+                        color: Colors.orange,
                         onPressed: () {
                           Navigator.pushNamed(
                             context,
@@ -107,20 +108,19 @@ class DashboardScreen extends StatelessWidget {
                               "name": name,
                               "email": email,
                               "phone": phone,
+                              "role": role,
                             },
                           );
                         },
-                        style: _buttonStyle(Colors.deepOrange),
                       ),
-                      const SizedBox(height: 16),
-
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.logout),
-                        label: const Text('התנתק'),
+                      _buildButton(
+                        context,
+                        label: "התנתק",
+                        icon: Icons.logout,
+                        color: Colors.red,
                         onPressed: () {
                           Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
                         },
-                        style: _buttonStyle(Colors.red),
                       ),
                     ],
                   ),
@@ -133,15 +133,24 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  // ✅ כפתורים עם צבע רקע מותאם
-  ButtonStyle _buttonStyle(Color color) {
-    return ElevatedButton.styleFrom(
-      backgroundColor: color,
-      foregroundColor: Colors.white,
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      textStyle: const TextStyle(fontSize: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+  Widget _buildButton(BuildContext context,
+      {required String label,
+      required IconData icon,
+      required Color color,
+      required VoidCallback? onPressed}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ElevatedButton.icon(
+        icon: Icon(icon),
+        label: Text(label),
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          minimumSize: Size(double.infinity, 50),
+          textStyle: TextStyle(fontSize: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       ),
     );
   }

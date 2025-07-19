@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -7,6 +8,7 @@ class EditProfileScreen extends StatefulWidget {
   final String name;
   final String email;
   final String phone;
+  final String role;
 
   const EditProfileScreen({
     Key? key,
@@ -14,6 +16,7 @@ class EditProfileScreen extends StatefulWidget {
     required this.name,
     required this.email,
     required this.phone,
+    required this.role,
   }) : super(key: key);
 
   @override
@@ -47,7 +50,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://10.0.0.10:5000/update_profile'),
+        Uri.parse('http://localhost:5000/update_profile'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "user_id": widget.userId,
@@ -79,36 +82,97 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
+  Widget _buildTextField(TextEditingController controller, String label, IconData icon,
+      [TextInputType type = TextInputType.text]) {
+    return TextField(
+      controller: controller,
+      keyboardType: type,
+      style: TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: Colors.white),
+        prefixIcon: Icon(icon, color: Colors.white),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.1),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        enabledBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.white30),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderSide: BorderSide(color: Colors.tealAccent),
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+
+  void _navigateBack() {
+    if (widget.role == 'admin') {
+     Navigator.pushNamedAndRemoveUntil(
+  context,
+  '/admin_dashboard',
+  (route) => false,
+  arguments: {
+
+        "user_id": widget.userId,
+        "name": _nameController.text.trim(),
+        "email": _emailController.text.trim(),
+        "phone": _phoneController.text.trim(),
+      });
+    } else {
+      Navigator.pushNamedAndRemoveUntil(
+  context,
+  '/dashboard',
+  (route) => false,
+  arguments: {
+
+        "user_id": widget.userId,
+        "name": _nameController.text.trim(),
+        "email": _emailController.text.trim(),
+        "phone": _phoneController.text.trim(),
+        "role": widget.role,
+        "status": "active", // תוכל להחליף אם יש לך משתנה מצב
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text("עריכת פרופיל"),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _navigateBack,
+        ),
+        backgroundColor: Colors.teal,
+      ),
       body: Stack(
         children: [
-          // ✅ רקע תמונה
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage("assets/images/cta-bg.jpg"),
-                fit: BoxFit.cover,
-              ),
-            ),
+          Positioned.fill(
+            child: Image.asset("assets/images/cta-bg.jpg", fit: BoxFit.cover),
           ),
-          // ✅ תוכן מעוצב
+          Container(color: Colors.black.withOpacity(0.4)),
           Center(
-            child: SingleChildScrollView(
-              child: Card(
-                color: Colors.white.withOpacity(0.90),
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                elevation: 10,
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  width: 400,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       const Text(
                         'עריכת פרופיל',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.teal),
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
@@ -138,22 +202,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  // ✅ שדה קלט עם עיצוב אחיד
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon,
-      [TextInputType type = TextInputType.text]) {
-    return TextField(
-      controller: controller,
-      keyboardType: type,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        filled: true,
-        fillColor: Colors.grey.shade100,
       ),
     );
   }

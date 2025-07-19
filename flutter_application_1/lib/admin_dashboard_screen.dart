@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/view_user_reservations_screen.dart';
 
@@ -23,61 +24,67 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text("לוח ניהול", style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'התנתקות',
+            onPressed: () {
+              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+            },
+          ),
+        ],
+        backgroundColor: Colors.teal,
+        elevation: 0,
+      ),
       body: Stack(
         children: [
-          // ✅ רקע עם תמונה
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage("assets/images/cta-bg.jpg"),
-                fit: BoxFit.cover,
-              ),
-            ),
+          Positioned.fill(
+            child: Image.asset("assets/images/cta-bg.jpg", fit: BoxFit.cover),
           ),
-          // ✅ תוכן שקוף על הרקע
+          Container(color: Colors.black.withOpacity(0.4)),
           Center(
-            child: SingleChildScrollView(
-              child: Card(
-                color: Colors.white.withOpacity(0.85),
-                elevation: 12,
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  width: 450,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
                         "שלום ${widget.name}!",
                         style: const TextStyle(
-                          fontSize: 24,
+                          fontSize: 26,
                           fontWeight: FontWeight.bold,
-                          color: Colors.teal,
+                          color: Colors.white,
                         ),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
 
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.manage_search),
-                        label: const Text("ניהול הזמנות לפי משתמש"),
+                      _buildButton(
+                        icon: Icons.manage_search,
+                        label: "ניהול הזמנות לפי משתמש",
                         onPressed: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                              builder: (_) => ViewUserReservationsScreen(),
-                            ),
+                            MaterialPageRoute(builder: (_) => ViewUserReservationsScreen()),
                           );
                         },
-                        style: _buttonStyle(),
                       ),
-                      const SizedBox(height: 16),
-
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.person),
-                        label: const Text("עריכת פרופיל מנהל"),
+                      _buildButton(
+                        icon: Icons.person,
+                        label: "עריכת פרופיל מנהל",
                         onPressed: () {
                           Navigator.pushNamed(
                             context,
@@ -87,35 +94,57 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               "name": widget.name,
                               "email": widget.email,
                               "phone": widget.phone,
+                              "role": 'admin',
                             },
                           );
                         },
-                        style: _buttonStyle(),
                       ),
-                      const SizedBox(height: 16),
-
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.lock),
-                        label: const Text("ניהול משתמשים"),
+                      _buildButton(
+                        icon: Icons.lock,
+                        label: "ניהול משתמשים",
                         onPressed: () {
                           Navigator.pushNamed(context, '/manage_users');
                         },
-                        style: _buttonStyle(),
                       ),
-                      const SizedBox(height: 16),
-
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.add),
-                        label: const Text("ביצוע הזמנה"),
+                      _buildButton(
+                        icon: Icons.add,
+                        label: "ביצוע הזמנה",
                         onPressed: () {
-                          Navigator.pushNamed(
-                            context,
-                            '/reserve_parking',
-                            arguments: widget.userId,
-                          );
+                          Navigator.pushNamed(context, '/reserve_parking', arguments: widget.userId);
                         },
-                        style: _buttonStyle(),
                       ),
+                      _buildButton(
+                        icon: Icons.bar_chart,
+                        label: "סטטיסטיקות כלליות",
+                        onPressed: () {
+                          Navigator.pushNamed(context, '/admin_stats');
+                        },
+                      ),
+                      _buildButton(
+                        icon: Icons.science,
+                        label: "סימולציית יעילות אלגוריתם",
+                        onPressed: () {
+                          Navigator.pushNamed(context, '/simulation');
+                        },
+                      ),
+                      _buildButton(
+  icon: Icons.query_stats,
+  label: "יעילות מנתונים אמיתיים",
+  onPressed: () {
+   Navigator.pushNamed(
+  context,
+  '/real_efficiency',
+  arguments: {
+    'user_id': widget.userId,
+    'name': widget.name,
+    'email': widget.email,
+    'phone': widget.phone,
+  },
+);
+
+  },
+),
+
                     ],
                   ),
                 ),
@@ -127,15 +156,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // ✅ פונקציה שחוזרת על עיצוב כפתורים
-  ButtonStyle _buttonStyle() {
-    return ElevatedButton.styleFrom(
-      backgroundColor: Colors.teal,
-      foregroundColor: Colors.white,
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      textStyle: const TextStyle(fontSize: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+  Widget _buildButton({required IconData icon, required String label, required VoidCallback onPressed}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: ElevatedButton.icon(
+        icon: Icon(icon, size: 20),
+        label: Text(label, style: TextStyle(fontSize: 16)),
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.teal,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       ),
     );
   }

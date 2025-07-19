@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -21,13 +22,11 @@ class _ModernReservationScreenState extends State<ModernReservationScreen> {
   Future<void> fetchAvailableSpots() async {
     if (startTime == null || endTime == null) return;
 
-    DateTime start = DateTime(
-        selectedDate.year, selectedDate.month, selectedDate.day, startTime!.hour, startTime!.minute);
-    DateTime end = DateTime(
-        selectedDate.year, selectedDate.month, selectedDate.day, endTime!.hour, endTime!.minute);
+    DateTime start = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, startTime!.hour, startTime!.minute);
+    DateTime end = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, endTime!.hour, endTime!.minute);
 
     final response = await http.post(
-      Uri.parse('http://10.0.0.10:5000/available_spots_range'),
+      Uri.parse('http://localhost:5000/available_spots_range'),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "start_time": start.toIso8601String(),
@@ -52,27 +51,20 @@ class _ModernReservationScreenState extends State<ModernReservationScreen> {
     if (startTime == null || endTime == null) return;
 
     DateTime now = DateTime.now();
-    DateTime start = DateTime(
-        selectedDate.year, selectedDate.month, selectedDate.day, startTime!.hour, startTime!.minute);
-    DateTime end = DateTime(
-        selectedDate.year, selectedDate.month, selectedDate.day, endTime!.hour, endTime!.minute);
+    DateTime start = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, startTime!.hour, startTime!.minute);
+    DateTime end = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, endTime!.hour, endTime!.minute);
 
     if (start.isBefore(now)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ לא ניתן להזמין לשעה שכבר עברה")),
-      );
+      _show("❌ לא ניתן להזמין לשעה שכבר עברה");
       return;
     }
-
     if (end.isBefore(start)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ שעת הסיום צריכה להיות אחרי שעת ההתחלה")),
-      );
+      _show("❌ שעת הסיום צריכה להיות אחרי שעת ההתחלה");
       return;
     }
 
     final response = await http.post(
-      Uri.parse('http://10.0.0.10:5000/add_reservation'),
+      Uri.parse('http://localhost:5000/add_reservation'),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "user_id": widget.userId,
@@ -83,13 +75,52 @@ class _ModernReservationScreenState extends State<ModernReservationScreen> {
     );
 
     if (response.statusCode == 201) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("✅ ההזמנה נוספה!")));
+      _show("✅ ההזמנה נוספה!");
       fetchAvailableSpots();
     } else {
       final msg = jsonDecode(response.body)['message'];
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("❌ $msg")));
+      _show("❌ $msg");
     }
   }
+void _show(String msg) {
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      backgroundColor: Colors.white, // רקע לבהירות (תוכל לשנות)
+      title: const Text(
+        "שימו לב",
+        style: TextStyle(
+          color: Colors.black,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      content: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.red),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              msg,
+              style: TextStyle(color: Colors.black87, fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text(
+            "סגור",
+            style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+
 
   Future<void> pickDate() async {
     final picked = await showDatePicker(
@@ -112,24 +143,6 @@ class _ModernReservationScreenState extends State<ModernReservationScreen> {
     );
 
     if (picked != null) {
-      final now = DateTime.now();
-      final pickedDateTime = DateTime(
-        selectedDate.year, selectedDate.month, selectedDate.day,
-        picked.hour, picked.minute,
-      );
-
-      if (selectedDate.year == now.year &&
-          selectedDate.month == now.month &&
-          selectedDate.day == now.day) {
-        final oneHourFromNow = now.add(Duration(hours: 1));
-        if (pickedDateTime.isBefore(oneHourFromNow)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("⏰ יש לבחור שעה לפחות שעה קדימה מהשעה הנוכחית")),
-          );
-          return;
-        }
-      }
-
       setState(() {
         if (isStart) {
           startTime = picked;
@@ -137,7 +150,6 @@ class _ModernReservationScreenState extends State<ModernReservationScreen> {
           endTime = picked;
         }
       });
-
       fetchAvailableSpots();
     }
   }
@@ -147,51 +159,63 @@ class _ModernReservationScreenState extends State<ModernReservationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("הזמנת חניה")),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton(
-                  onPressed: pickDate,
-                  child: Text(DateFormat('dd/MM/yyyy').format(selectedDate)),
+      appBar: AppBar(title: Text("הזמנת חניה"), backgroundColor: Colors.teal),
+      body: Stack(
+        children: [
+          Positioned.fill(child: Image.asset("assets/images/cta-bg.jpg", fit: BoxFit.cover)),
+          Container(color: Colors.black.withOpacity(0.4)),
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  padding: EdgeInsets.all(20),
+                  margin: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(onPressed: pickDate, child: Text(DateFormat('dd/MM/yyyy').format(selectedDate))),
+                          ElevatedButton(onPressed: () => pickTime(isStart: true), child: Text(startTime != null ? "מ ${formatTime(startTime!)}" : "בחר התחלה")),
+                          ElevatedButton(onPressed: () => pickTime(isStart: false), child: Text(endTime != null ? "עד ${formatTime(endTime!)}" : "בחר סיום")),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      Expanded(
+                        child: availableSpots.isEmpty
+                            ? Center(child: Text("אין חניות פנויות לטווח שבחרת", style: TextStyle(color: Colors.white)))
+                            : ListView.builder(
+                                itemCount: availableSpots.length,
+                                itemBuilder: (context, index) {
+                                  final spot = availableSpots[index];
+                                  return Card(
+                                    color: Colors.white.withOpacity(0.8),
+                                    child: ListTile(
+                                      title: Text("חניה ${spot['spot_number']} - ${spot['lot_name']}"),
+                                      subtitle: Text("מרחק: ${spot['distance_from_college']} מטר (${spot['distance_category']})"),
+                                      trailing: ElevatedButton(
+                                        onPressed: () => reserveSpot(spot['id']),
+                                        child: Text("הזמן"),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
-                ElevatedButton(
-                  onPressed: () => pickTime(isStart: true),
-                  child: Text(startTime != null ? "מ ${formatTime(startTime!)}" : "בחר התחלה"),
-                ),
-                ElevatedButton(
-                  onPressed: () => pickTime(isStart: false),
-                  child: Text(endTime != null ? "עד ${formatTime(endTime!)}" : "בחר סיום"),
-                ),
-              ],
+              ),
             ),
-            SizedBox(height: 20),
-            Expanded(
-              child: availableSpots.isEmpty
-                  ? Center(child: Text("אין חניות פנויות לטווח שבחרת"))
-                  : ListView.builder(
-                      itemCount: availableSpots.length,
-                      itemBuilder: (context, index) {
-                        final spot = availableSpots[index];
-                        return Card(
-                          child: ListTile(
-                            title: Text("חניה ${spot['spot_number']} - ${spot['lot_name']}"),
-                            subtitle: Text("מרחק: ${spot['distance_from_college']} מטר (${spot['distance_category']})"),
-                            trailing: ElevatedButton(
-                              onPressed: () => reserveSpot(spot['id']),
-                              child: Text("הזמן"),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            )
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

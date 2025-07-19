@@ -1,8 +1,13 @@
 from flask import Flask, jsonify, request
+from flask_cors import CORS
+from user_model import User
+
 import pg8000
 import bcrypt
-
+from user_model import User  # ודא שהקובץ user_model.py נמצא באותה תיקייה
+from datetime import datetime, timedelta
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://localhost:4997"}})
 
 def get_db_connection():
     """יצירת חיבור למסד הנתונים"""
@@ -75,33 +80,25 @@ def login():
         conn.close()
 @app.route('/update_user_status', methods=['POST'])
 def update_user_status():
-    data = request.get_json()
-
-    if "user_id" not in data or "status" not in data:
-        return jsonify({"message": "Missing user_id or status", "status": "error"}), 400
-
-    user_id = data["user_id"]
-    status = data["status"]
-
-    if status not in ['active', 'blocked']:
-        return jsonify({"message": "Invalid status value", "status": "error"}), 400
-
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"message": "Database connection failed", "status": "error"}), 500
+    data = request.json
+    user_id = data['user_id']
+    new_status = data['status']
 
     try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE users SET status = %s WHERE id = %s;", (status, user_id))
-            conn.commit()
-            return jsonify({"message": f"User status updated to {status}", "status": "success"}), 200
-
-    except Exception as e:
-        conn.rollback()
-        return jsonify({"message": f"Database error: {str(e)}", "status": "error"}), 500
-
-    finally:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE users
+            SET status = %s,
+                force_status_override = true
+            WHERE id = %s
+        """, (new_status, user_id))
+        conn.commit()
+        cur.close()
         conn.close()
+        return jsonify({'message': 'User status updated successfully'}), 200
+    except Exception as e:
+        return jsonify({'message': f'Error: {str(e)}'}), 500
 
 @app.route('/users', methods=['GET'])
 def get_users():
@@ -111,14 +108,20 @@ def get_users():
 
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id, name, email, status FROM users ORDER BY name ASC;")
+        cur.execute("SELECT id, name, email, status, force_status_override FROM users ORDER BY name ASC;")
         users = cur.fetchall()
         cur.close()
         conn.close()
 
         return jsonify({
             "status": "success",
-            "users": [{"id": u[0], "name": u[1], "email": u[2], "status": u[3]} for u in users]
+            "users": [{
+                "id": u[0],
+                "name": u[1],
+                "email": u[2],
+                "status": u[3],
+                "force_status_override": u[4]  # ✅ נוסף כאן!
+            } for u in users]
         }), 200
 
     except Exception as e:
@@ -199,6 +202,23 @@ def get_available_spots_range():
     except Exception as e:
         return jsonify({"message": f"Database error: {str(e)}", "status": "error"}), 500
 
+def auto_cancel_expired_reservations(conn):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE reservations
+                SET status = 'illegal_cancelled'
+                WHERE status = 'confirmed'
+                  AND start_time + INTERVAL '10 minutes' < NOW();
+            """)
+            conn.commit()
+    except Exception as e:
+        print("Auto cancel error:", e)
+        conn.rollback()
+
+
+
+
 
 @app.route('/add_reservation', methods=['POST'])
 def add_reservation():
@@ -213,6 +233,9 @@ def add_reservation():
     spot_id = data["spot_id"]
     start_time = datetime.fromisoformat(data["start_time"])
     end_time = datetime.fromisoformat(data["end_time"])
+    # ✅ בדיקה: לא ניתן להזמין לשעה שכבר עברה
+    if start_time < datetime.now():
+        return jsonify({"message": "❌ לא ניתן להזמין לשעה שכבר עברה", "status": "error"}), 400
 
     # חישוב גבולות השבוע (ראשון עד שבת)
     today = datetime.today()
@@ -234,40 +257,50 @@ def add_reservation():
             user = cur.fetchone()
             if not user:
                 return jsonify({"message": "User not found", "status": "error"}), 404
-
             user_status = user[0]
 
-            # 🔒 שלב 2: בדוק את הקטגוריה של מקום החניה
-            cur.execute("SELECT distance_category FROM parking_spots WHERE id = %s;", (spot_id,))
+            # 🔒 שלב 2: נעל את שורת החניה כדי למנוע התנגשויות
+            cur.execute("""
+                SELECT distance_category FROM parking_spots 
+                WHERE id = %s 
+                FOR UPDATE;
+            """, (spot_id,))
             spot = cur.fetchone()
             if not spot:
                 return jsonify({"message": "Parking spot not found", "status": "error"}), 404
-
             distance_category = spot[0]
 
-            # 🔒 שלב 3: אם המשתמש חסום ורוצה להזמין חניה שאינה רחוקה – נחסום
+            # 🔒 שלב 3: בדיקת חסימה מול קטגוריית מרחק
             if user_status == 'blocked' and distance_category != 'רחוק':
                 return jsonify({
                     "message": "משתמש חסום יכול להזמין רק חניה רחוקה",
                     "status": "error"
                 }), 403
 
-            # בדיקה אם המקום תפוס באותו טווח זמן
+            # 🔒 שלב 4: בדיקת חפיפה עם הזמנה קיימת לאותה חניה
             cur.execute("""
                 SELECT id FROM reservations 
-                WHERE spot_id = %s AND 
-                      ((start_time, end_time) OVERLAPS (%s, %s))
+                WHERE spot_id = %s 
+                  AND ((start_time, end_time) OVERLAPS (%s, %s))
             """, (spot_id, start_time, end_time))
-
             if cur.fetchone():
                 return jsonify({"message": "המקום כבר שמור לשעה זו", "status": "error"}), 409
 
-            # הכנסת ההזמנה
+            # 🔒 שלב 5: בדיקת חפיפה עם הזמנה אחרת של אותו משתמש באותו זמן
+            cur.execute("""
+                SELECT id FROM reservations 
+                WHERE user_id = %s 
+                  AND ((start_time, end_time) OVERLAPS (%s, %s))
+                  AND status = 'confirmed';
+            """, (user_id, start_time, end_time))
+            if cur.fetchone():
+                return jsonify({"message": "כבר יש לך הזמנה בשעות האלו", "status": "error"}), 409
+
+            # ✅ שלב 6: הכנסת ההזמנה
             cur.execute("""
                 INSERT INTO reservations (user_id, spot_id, start_time, end_time, status) 
                 VALUES (%s, %s, %s, %s, 'confirmed') RETURNING id;
             """, (user_id, spot_id, start_time, end_time))
-
             reservation_id = cur.fetchone()[0]
             conn.commit()
             return jsonify({"message": "ההזמנה נוספה", "status": "success", "reservation_id": reservation_id}), 201
@@ -278,6 +311,7 @@ def add_reservation():
 
     finally:
         conn.close()
+
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
@@ -413,6 +447,44 @@ def reserve_spot():
     finally:
         cur.close()
         conn.close()
+@app.route('/confirm_arrival', methods=['POST'])
+def confirm_arrival():
+    data = request.get_json()
+    reservation_id = data.get("reservation_id")
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database error", "status": "error"}), 500
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT start_time, status FROM reservations WHERE id = %s", (reservation_id,))
+            row = cur.fetchone()
+
+            if not row:
+                return jsonify({"message": "Reservation not found", "status": "error"}), 404
+
+            start_time, status = row
+            now = datetime.now()
+
+            if status != "confirmed":
+                return jsonify({"message": "Reservation cannot be confirmed", "status": "error"}), 400
+
+            if not (start_time - timedelta(minutes=10) <= now <= start_time + timedelta(minutes=10)):
+                return jsonify({"message": "Too early or too late to confirm arrival", "status": "error"}), 403
+
+            cur.execute("UPDATE reservations SET status = 'arrived' WHERE id = %s", (reservation_id,))
+            conn.commit()
+
+            return jsonify({"message": "Arrival confirmed", "status": "success"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"message": f"Error: {str(e)}", "status": "error"}), 500
+
+    finally:
+        conn.close()
+
 
 @app.route('/cancel_reservation', methods=['POST'])
 def cancel_reservation():
@@ -521,14 +593,69 @@ def register():
 
     finally:
         conn.close()
+@app.route('/edit_reservation', methods=['POST'])
+def edit_reservation():
+    data = request.get_json()
 
+    required_fields = ["reservation_id", "start_time", "end_time"]
+    if not all(field in data for field in required_fields):
+        return jsonify({"message": "Missing fields", "status": "error"}), 400
+
+    reservation_id = data["reservation_id"]
+    new_start = datetime.fromisoformat(data["start_time"])
+    new_end = datetime.fromisoformat(data["end_time"])
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed", "status": "error"}), 500
+
+    try:
+        with conn.cursor() as cur:
+            # שליפת זמן ההתחלה המקורי
+            cur.execute("SELECT start_time, spot_id FROM reservations WHERE id = %s AND status = 'confirmed';", (reservation_id,))
+            result = cur.fetchone()
+            if not result:
+                return jsonify({"message": "Reservation not found or cannot be edited", "status": "error"}), 404
+
+            original_start, spot_id = result
+
+            # בדיקה אם נותרו פחות מ-12 שעות
+            if original_start - datetime.now() < timedelta(hours=12):
+                return jsonify({"message": "ניתן לערוך הזמנה רק אם נותרו יותר מ-12 שעות לתחילתה", "status": "error"}), 403
+
+            # בדיקה אם הזמן החדש פנוי
+            cur.execute("""
+                SELECT id FROM reservations 
+                WHERE spot_id = %s AND id != %s
+                AND ((start_time, end_time) OVERLAPS (%s, %s))
+                AND status = 'confirmed';
+            """, (spot_id, reservation_id, new_start, new_end))
+
+            if cur.fetchone():
+                return jsonify({"message": "הזמן החדש כבר שמור", "status": "error"}), 409
+
+            # עדכון ההזמנה
+            cur.execute("""
+                UPDATE reservations SET start_time = %s, end_time = %s
+                WHERE id = %s;
+            """, (new_start, new_end, reservation_id))
+            conn.commit()
+
+            return jsonify({"message": "ההזמנה עודכנה בהצלחה", "status": "success"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"message": f"Database error: {str(e)}", "status": "error"}), 500
+
+    finally:
+        conn.close()
 
 @app.route('/my_reservations/<int:user_id>', methods=['GET'])
 def get_reservations(user_id):
     """שליפת ההזמנות של המשתמש"""
     conn = get_db_connection()
     cur = conn.cursor()
-
+    auto_cancel_expired_reservations(conn)
     try:
         cur.execute("""
             SELECT r.id, p.spot_number, r.start_time, r.end_time, r.status
@@ -559,6 +686,457 @@ def get_reservations(user_id):
 
     except Exception as e:
         return jsonify({"message": f"Database error: {str(e)}", "status": "error"}), 500
+    
+
+
+@app.route('/stats_by_month', methods=['GET'])
+def stats_by_month():
+    conn = psycopg2.connect(...)  # פרטי ההתחברות
+    cur = conn.cursor()
+    
+    query = """
+        SELECT 
+            DATE_TRUNC('month', start_time) AS month,
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE status = 'APPROVED') AS approved,
+            COUNT(*) FILTER (WHERE status = 'CANCELLED') AS legal_cancelled,
+            COUNT(*) FILTER (WHERE status = 'ILLEGAL_CANCELLED') AS illegal_cancelled
+        FROM reservations
+        GROUP BY month
+        ORDER BY month;
+    """
+    cur.execute(query)
+    result = cur.fetchall()
+    conn.close()
+
+    # החזרה בפורמט JSON
+    stats = [{
+        "month": row[0].strftime('%Y-%m'),
+        "total": row[1],
+        "approved": row[2],
+        "legal_cancelled": row[3],
+        "illegal_cancelled": row[4]
+    } for row in result]
+
+    return jsonify(stats)
+@app.route('/stats', methods=['GET'])
+def get_overall_stats():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'arrived') AS arrived,
+                COUNT(*) FILTER (WHERE status = 'cancelled') AS canceled,
+                COUNT(*) FILTER (WHERE status = 'illegal_cancelled') AS illegal
+            FROM reservations;
+        """)
+        result = cur.fetchone()
+        conn.close()
+
+        # ודא ש־None הופך ל־0
+        total = result[0] or 0
+        arrived = result[1] or 0
+        canceled = result[2] or 0
+        illegal = result[3] or 0
+
+        return jsonify({
+            "reservations": total,
+            "arrived": arrived,
+            "canceled": canceled,
+            "illegal": illegal
+        }), 200
+
+    except Exception as e:
+        return jsonify({"message": f"Database error: {str(e)}"}), 500
+
+
+@app.route('/monthly_stats', methods=['POST'])
+def get_monthly_stats():
+    data = request.get_json()
+    month = data.get('month')  # ציפייה לפורמט YYYY-MM
+
+    if not month:
+        return jsonify({"message": "Missing 'month'", "status": "error"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed", "status": "error"}), 500
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE status = 'confirmed') AS approved,
+                    COUNT(*) FILTER (WHERE status = 'cancelled') AS canceled,
+                    COUNT(*) FILTER (WHERE status = 'illegal_cancelled') AS illegal,
+                    COUNT(*) FILTER (WHERE status = 'arrived') AS arrived
+                FROM reservations
+                WHERE TO_CHAR(start_time, 'YYYY-MM') = %s;
+            """, (month,))
+            result = cur.fetchone()
+            total, approved, canceled, illegal, arrived = result
+
+            return jsonify({
+                "reservations": total,
+                "approved": approved,
+                "canceled": canceled,
+                "illegal": illegal,
+                "arrived": arrived
+            }), 200
+
+    except Exception as e:
+        return jsonify({"message": f"Database error: {str(e)}", "status": "error"}), 500
+
+    finally:
+        conn.close()
+
+def compute_user_grade_and_status(statuses):
+    if not statuses:
+        return 60.0, 'active'
+
+    total = len(statuses)
+    score = 0
+    for status in statuses:
+        if status == 'arrived':
+            score += 10
+        elif status == 'cancelled':
+            score += 0
+        elif status == 'illegal_cancelled':
+            score -= 20
+
+    max_score = total * 10
+    grade = (score / max_score) * 100
+    grade = max(0.0, min(100.0, grade))
+    user_status = 'blocked' if grade < 30 else 'active'
+    return round(grade, 1), user_status
+
+ 
+@app.route('/user_behavior/<int:user_id>', methods=['GET'])
+def simulate_user_behavior(user_id):
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+
+    try:
+        # עדכון הזמנות שהסתיימו מסטטוס 'arrived' ל־'completed'
+        update_expired_arrivals(conn)
+
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, role, status, force_status_override FROM users WHERE id = %s;", (user_id,))
+        user_data = cur.fetchone()
+
+        if not user_data:
+            cur.close()
+            conn.close()
+            return jsonify({"message": "User not found"}), 404
+
+        user_id, name, role, current_status, force_override = user_data
+
+        # שליפת כל ההזמנות של המשתמש כולל זמנים
+        cur.execute("""
+            SELECT start_time, end_time, status
+            FROM reservations
+            WHERE user_id = %s;
+        """, (user_id,))
+        all_reservations = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # חישוב ציון
+        total = len(all_reservations)
+        if total == 0:
+            grade = 60.0
+        else:
+            points = 0
+            for start, end, res_status in all_reservations:
+                if res_status in ('arrived', 'completed'):
+                    points += 10
+                elif res_status == 'cancelled':
+                    points += 0
+                elif res_status == 'illegal_cancelled':
+                    points -= 20
+            grade = max(0.0, min(100.0, (points / (10 * total)) * 100))
+
+        # קביעת סטטוס נוכחי לפי הזמן האמיתי
+        now = datetime.now()
+        status_now = 'unknown'
+        for start, end, res_status in all_reservations:
+            if res_status == 'arrived' and start <= now <= end:
+                status_now = 'arrived'
+                break
+            elif res_status == 'arrived' and end < now:
+                status_now = 'completed'
+                break
+
+        # קביעת סטטוס חדש רק אם אין force_status_override
+        if not force_override:
+            new_status = 'blocked' if grade < 30 else 'active'
+
+            if new_status != current_status:
+                conn2 = get_db_connection()
+                if conn2:
+                    with conn2.cursor() as cur2:
+                        cur2.execute("UPDATE users SET status = %s WHERE id = %s;", (new_status, user_id))
+                        conn2.commit()
+                    conn2.close()
+
+        return jsonify({
+            "user_id": user_id,
+            "name": name,
+            "role": role,
+            "status_now": status_now,
+            "grade": round(grade, 1)
+        })
+
+    except Exception as e:
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+@app.route('/reset_override', methods=['POST'])
+def reset_override():
+    data = request.json
+    user_id = data.get('user_id')
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE users
+            SET force_status_override = false
+            WHERE id = %s
+        """, (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # ✅ קריאה לחישוב אוטומטי מחדש של התנהגות (ניקוד → חסימה אם צריך)
+        simulate_user_behavior_internal(user_id)
+
+        return jsonify({"message": "override reset"}), 200
+
+    except Exception as e:
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+
+def update_expired_arrivals(conn):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE reservations
+                SET status = 'completed'
+                WHERE status = 'arrived' AND end_time < NOW();
+            """)
+            conn.commit()
+    except Exception as e:
+        print(f"Error updating completed reservations: {str(e)}")
+        conn.rollback()
+
+from datetime import datetime
+@app.route('/simulate_efficiency', methods=['POST'])
+def simulate_efficiency():
+    data = request.get_json()
+    no_show_prob = data.get("no_show_prob", 0.03)
+    cancellation_prob = data.get("cancellation_prob", 0.05)
+
+    user = User(user_id=0, name="Simulation")
+    user.parametersForTimeTables_set({
+        "arrival_mean_hour": 8,
+        "arrival_stddev": 1,
+        "departure_mean_hour": 17,
+        "departure_stddev": 1,
+        "days_of_week": list(range(5)),
+        "no_show_prob": no_show_prob,
+        "cancellation_prob": cancellation_prob
+    })
+    user.generalWeekTimeTable_make()
+    user.realTimeTable_make()
+    grade, status = user.compute_grade_and_status()
+
+    return jsonify({
+        "grade": grade,
+        "status": status,
+        "arrived": user.reservation_statuses.count("arrived"),
+        "cancelled": user.reservation_statuses.count("cancelled"),
+        "illegal_cancelled": user.reservation_statuses.count("illegal_cancelled"),
+        "total_reservations": len(user.reservation_statuses)
+    })
+@app.route('/real_efficiency', methods=['POST'])
+def real_efficiency():
+    data = request.get_json()
+    start_date = data.get("start_date")
+    end_date = data.get("end_date")
+
+    if not start_date or not end_date:
+        return jsonify({"message": "Missing date range", "status": "error"}), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed", "status": "error"}), 500
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT status FROM reservations
+                WHERE start_time::date BETWEEN %s AND %s;
+            """, (start_date, end_date))
+
+            statuses = [row[0] for row in cur.fetchall()]
+            total = len(statuses)
+            arrived = statuses.count("arrived")
+            cancelled = statuses.count("cancelled")
+            illegal = statuses.count("illegal_cancelled")
+
+            if total == 0:
+                return jsonify({"message": "No data", "status": "error"}), 404
+
+            # נוסחה בסיסית ליעילות
+            gamma = 2  # אפשר להפוך את זה לפרמטר בעתיד
+            efficiency = (arrived / total) - gamma * (illegal / total)
+
+            return jsonify({
+                "status": "success",
+                "efficiency": round(efficiency, 3),
+                "arrived": arrived,
+                "cancelled": cancelled,
+                "illegal_cancelled": illegal,
+                "total": total
+            })
+
+    except Exception as e:
+        return jsonify({"message": f"Error: {str(e)}", "status": "error"}), 500
+
+    finally:
+        conn.close()
+# ✅ קטע חדש להוספה בסוף הקובץ app.py
+
+@app.route('/real_efficiency_with_params', methods=['POST'])
+def real_efficiency_with_params():
+    data = request.get_json()
+    points_arrived = data.get("points_arrived", 10)
+    points_cancelled = data.get("points_cancelled", 0)
+    points_illegal = data.get("points_illegal", -20)
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed"}), 500
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users;")
+        user_ids = [row[0] for row in cur.fetchall()]
+
+        total_users = len(user_ids)
+        total_grade = 0
+        blocked_count = 0
+
+        total_arrived = 0
+        total_cancelled = 0
+        total_illegal = 0
+        total_reservations = 0
+
+        # ניקוד מקסימלי מוחלט
+        max_single_score = max(abs(points_arrived), abs(points_cancelled), abs(points_illegal))
+
+        for user_id in user_ids:
+            cur.execute("SELECT status FROM reservations WHERE user_id = %s;", (user_id,))
+            statuses = [r[0] for r in cur.fetchall()]
+            total = len(statuses)
+            if total == 0:
+                grade = 60.0  # ניקוד ברירת מחדל
+            else:
+                score = 0
+                for s in statuses:
+                    if s == 'arrived':
+                        score += points_arrived
+                        total_arrived += 1
+                    elif s == 'cancelled':
+                        score += points_cancelled
+                        total_cancelled += 1
+                    elif s == 'illegal_cancelled':
+                        score += points_illegal
+                        total_illegal += 1
+                max_score = total * max_single_score
+                grade = max(0, min(100, (score / max_score) * 100))
+            total_grade += grade
+            total_reservations += total
+
+            if grade < 30:
+                blocked_count += 1
+
+        avg_grade = round(total_grade / total_users, 1) if total_users > 0 else 0
+        return jsonify({
+            "avg_grade": avg_grade,
+            "blocked_percent": round((blocked_count / total_users) * 100, 1),
+            "arrived": total_arrived,
+            "cancelled": total_cancelled,
+            "illegal_cancelled": total_illegal,
+            "total_reservations": total_reservations
+        })
+
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+    finally:
+        conn.close()
+
+
+def simulate_user_behavior_internal(user_id, points_arrived=10, points_cancelled=0, points_illegal=-20):
+    conn = get_db_connection()
+    if not conn:
+        return
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT force_status_override FROM users WHERE id = %s;", (user_id,))
+        result = cur.fetchone()
+        if not result:
+            return
+
+        force_override = result[0]
+
+        # שליפת כל ההזמנות של המשתמש
+        cur.execute("""
+            SELECT start_time, end_time, status
+            FROM reservations
+            WHERE user_id = %s;
+        """, (user_id,))
+        reservations = cur.fetchall()
+
+        # חישוב ניקוד
+        total = len(reservations)
+        if total == 0:
+            grade = 60.0
+        else:
+            points = 0
+            for start, end, res_status in reservations:
+                if res_status in ('arrived', 'completed'):
+                    points += points_arrived
+                elif res_status == 'cancelled':
+                    points += points_cancelled
+                elif res_status == 'illegal_cancelled':
+                    points += points_illegal
+            max_score = total * points_arrived
+            grade = max(0.0, min(100.0, (points / max_score) * 100)) if max_score > 0 else 0.0
+
+        # אם אין שליטת אדמין — עדכן סטטוס לפי ניקוד
+        if not force_override:
+            new_status = 'blocked' if grade < 30 else 'active'
+            cur.execute("UPDATE users SET status = %s WHERE id = %s;", (new_status, user_id))
+            conn.commit()
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Error in internal behavior calc:", e)
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+

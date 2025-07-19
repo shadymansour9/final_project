@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -13,30 +14,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
-  String selectedRole = 'student'; // ברירת מחדל
+  String selectedRole = 'student';
   bool _loading = false;
 
-  /// בדיקת אימייל
-  bool isValidEmail(String email) {
-    final emailRegExp = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
-    return emailRegExp.hasMatch(email);
-  }
-
-  /// בדיקת טלפון (רק מספרים, באורך 9-10)
-  bool isValidPhone(String phone) {
-    final phoneRegExp = RegExp(r'^\d{9,10}$');
-    return phoneRegExp.hasMatch(phone);
-  }
-
-  /// בדיקת סיסמה (לפחות 6 תווים)
-  bool isValidPassword(String password) {
-    return password.length >= 6;
-  }
+  bool isValidEmail(String email) => RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+  bool isValidPhone(String phone) => RegExp(r'^\d{9,10}$').hasMatch(phone);
+  bool isValidPassword(String password) => password.length >= 6;
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> register() async {
@@ -45,31 +31,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final phone = _phoneController.text.trim();
     final password = _passwordController.text;
 
-    if (name.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty) {
-      _showError("אנא מלא את כל השדות");
-      return;
-    }
-
-    if (!isValidEmail(email)) {
-      _showError("כתובת אימייל לא תקינה");
-      return;
-    }
-
-    if (!isValidPhone(phone)) {
-      _showError("מספר טלפון לא תקין");
-      return;
-    }
-
-    if (!isValidPassword(password)) {
-      _showError("הסיסמה צריכה להכיל לפחות 6 תווים");
-      return;
-    }
+    if (name.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty) return _showError("אנא מלא את כל השדות");
+    if (!isValidEmail(email)) return _showError("כתובת אימייל לא תקינה");
+    if (!isValidPhone(phone)) return _showError("מספר טלפון לא תקין");
+    if (!isValidPassword(password)) return _showError("הסיסמה צריכה להכיל לפחות 6 תווים");
 
     setState(() => _loading = true);
 
     try {
       final response = await http.post(
-        Uri.parse('http://10.0.0.10:5000/register'),
+        Uri.parse('http://localhost:5000/register'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "name": name,
@@ -83,9 +54,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✅ נרשמת בהצלחה!')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ נרשמת בהצלחה!')));
         Navigator.pushReplacementNamed(context, '/');
       } else {
         _showError(data['message'] ?? "שגיאה בהרשמה");
@@ -97,42 +66,96 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  Widget _buildTextField(TextEditingController controller, String label, {bool obscure = false, TextInputType? type}) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      keyboardType: type,
+      style: TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: Colors.white70),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.1),
+        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white30)),
+        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.tealAccent)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('הרשמה')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            TextField(controller: _nameController, decoration: InputDecoration(labelText: 'שם מלא')),
-            TextField(controller: _emailController, decoration: InputDecoration(labelText: 'אימייל')),
-            TextField(controller: _phoneController, decoration: InputDecoration(labelText: 'טלפון')),
-            TextField(controller: _passwordController, decoration: InputDecoration(labelText: 'סיסמה'), obscureText: true),
-
-            SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: selectedRole,
-              items: ['admin', 'lecturer', 'visitor', 'student'].map((String role) {
-                return DropdownMenuItem<String>(
-                  value: role,
-                  child: Text(role),
-                );
-              }).toList(),
-              onChanged: (String? newValue) {
-                setState(() {
-                  selectedRole = newValue!;
-                });
-              },
-              decoration: InputDecoration(labelText: 'בחר תפקיד'),
+      appBar: AppBar(title: Text('הרשמה'), backgroundColor: Colors.teal),
+      body: Stack(
+        children: [
+          Positioned.fill(child: Image.asset("assets/images/cta-bg.jpg", fit: BoxFit.cover)),
+          Container(color: Colors.black.withOpacity(0.4)),
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  padding: EdgeInsets.all(24),
+                  width: 420,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        Text('טופס הרשמה', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white), textAlign: TextAlign.center),
+                        SizedBox(height: 24),
+                        _buildTextField(_nameController, 'שם מלא'),
+                        SizedBox(height: 12),
+                        _buildTextField(_emailController, 'אימייל', type: TextInputType.emailAddress),
+                        SizedBox(height: 12),
+                        _buildTextField(_phoneController, 'טלפון', type: TextInputType.phone),
+                        SizedBox(height: 12),
+                        _buildTextField(_passwordController, 'סיסמה', obscure: true),
+                        SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          dropdownColor: Colors.grey[900],
+                          style: TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: 'בחר תפקיד',
+                            labelStyle: TextStyle(color: Colors.white70),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.1),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          value: selectedRole,
+                          items: ['admin', 'lecturer', 'visitor', 'student'].map((role) {
+                            return DropdownMenuItem(value: role, child: Text(role));
+                          }).toList(),
+                          onChanged: (val) => setState(() => selectedRole = val!),
+                        ),
+                        SizedBox(height: 20),
+                        _loading
+                            ? CircularProgressIndicator()
+                            : ElevatedButton.icon(
+                                icon: Icon(Icons.check),
+                                label: Text('הירשם'),
+                                onPressed: register,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal,
+                                  padding: EdgeInsets.symmetric(vertical: 14),
+                                  minimumSize: Size(double.infinity, 50),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
-
-            SizedBox(height: 20),
-            _loading
-                ? CircularProgressIndicator()
-                : ElevatedButton(onPressed: register, child: Text('הירשם')),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

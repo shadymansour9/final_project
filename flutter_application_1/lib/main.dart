@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_application_1/real_efficiency_screen.dart';
 import 'login_screen.dart';
 import 'home_screen.dart';
 import 'register_screen.dart';
@@ -11,6 +12,10 @@ import 'admin_dashboard_screen.dart';
 import 'view_user_reservations_screen.dart';
 import 'manage_users_screen.dart';
 import 'modern_reservation_screen.dart';
+import 'package:flutter_application_1/admin_stats_screen.dart';
+import 'package:flutter_application_1/admin_monthly_stats_screen.dart' as monthly;
+import 'package:flutter_application_1/admin_overall_stats_screen.dart' as overall;
+import 'package:flutter_application_1/simulation_screen.dart'; // שים את הנתיב המתאים
 
 void main() {
   runApp(const MyApp());
@@ -43,7 +48,7 @@ class MyApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      home:  BackgroundWrapper(child: LoginScreen()),
+      home: BackgroundWrapper(child: LoginScreen()),
       onGenerateRoute: (settings) {
         Widget page = NotFoundScreen();
 
@@ -57,6 +62,31 @@ class MyApp extends StatelessWidget {
           case '/register':
             page = RegisterScreen();
             break;
+          case '/admin_stats':
+            page = AdminStatsScreen();
+            break;
+          case '/admin_monthly_stats':
+            page = monthly.AdminMonthlyStatsScreen();
+            break;
+          case '/real_efficiency':
+  if (settings.arguments is Map<String, dynamic>) {
+    final args = settings.arguments as Map<String, dynamic>;
+    page = RealEfficiencyScreen(
+      userId: args['user_id'],
+      name: args['name'],
+      email: args['email'],
+      phone: args['phone'],
+    );
+  }
+  break;
+
+          case '/admin_overall_stats':
+            page = overall.AdminOverallStatsScreen();
+            break;
+          case '/simulation':
+  page = SimulationScreen();
+  break;
+
           case '/dashboard':
             if (settings.arguments is Map<String, dynamic>) {
               final args = settings.arguments as Map<String, dynamic>;
@@ -82,16 +112,18 @@ class MyApp extends StatelessWidget {
             }
             break;
           case '/edit_profile':
-            if (settings.arguments is Map<String, dynamic>) {
-              final args = settings.arguments as Map<String, dynamic>;
-              page = EditProfileScreen(
-                userId: args['user_id'] ?? 0,
-                name: args['name'] ?? "",
-                email: args['email'] ?? "",
-                phone: args['phone'] ?? "",
-              );
-            }
-            break;
+  if (settings.arguments is Map<String, dynamic>) {
+    final args = settings.arguments as Map<String, dynamic>;
+    page = EditProfileScreen(
+      userId: args['user_id'] ?? 0,
+      name: args['name'] ?? "",
+      email: args['email'] ?? "",
+      phone: args['phone'] ?? "",
+      role: args['role'] ?? "student", // ✅ חובה – אם לא admin, ברירת מחדל
+    );
+  }
+  break;
+
           case '/my_reservations':
             if (settings.arguments is int) {
               page = MyReservationsScreen(userId: settings.arguments as int);
@@ -131,9 +163,7 @@ class BackgroundWrapper extends StatelessWidget {
           ),
           Container(color: Colors.black.withOpacity(0.4)),
           Positioned.fill(
-            child: SafeArea(
-              child: child,
-            ),
+            child: SafeArea(child: child),
           ),
         ],
       ),
